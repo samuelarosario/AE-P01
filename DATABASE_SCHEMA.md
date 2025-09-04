@@ -187,4 +187,118 @@ db.get_api_usage_summary()
 5. **Views**: Pre-computed analytics views
 6. **Triggers**: Automatic data consistency maintenance
 
+## User Management Tables
+
+### `users` Table
+Secure user authentication and management.
+```sql
+- id (INTEGER PRIMARY KEY)
+- user_uuid (TEXT UNIQUE) - Unique user identifier
+- email (TEXT UNIQUE) - User email address
+- password_hash (TEXT) - Bcrypt hashed password
+- first_name/last_name (TEXT) - User names
+- is_active (BOOLEAN) - Account status
+- is_admin (BOOLEAN) - Admin privileges
+- created_at/updated_at/last_login (TIMESTAMP)
+```
+
+**Security Features**:
+- Bcrypt password hashing with salt
+- UUID-based identification
+- Account activation/deactivation
+- Admin role management
+- Last login tracking
+
+### `mission_orders` Table
+Mission and flight order management system.
+```sql
+- id (INTEGER PRIMARY KEY)
+- order_uuid (TEXT UNIQUE) - Unique order identifier
+- user_id (INTEGER) - Foreign key to users table
+- title (TEXT) - Order title/description
+- description (TEXT) - Detailed requirements
+- priority (TEXT) - low/medium/high/urgent
+- status (TEXT) - pending/approved/in_progress/completed/cancelled
+- departure_airport/arrival_airport (TEXT) - Route endpoints
+- departure_date/return_date (DATE) - Travel dates
+- passenger_count (INTEGER) - Number of passengers
+- aircraft_type (TEXT) - Required aircraft specifications
+- special_requirements (TEXT) - Additional requirements
+- budget_amount (DECIMAL) - Budget allocation
+- currency (TEXT) - Currency code (default: USD)
+- created_at/updated_at/completed_at (TIMESTAMP)
+```
+
+**Features**:
+- UUID-based order tracking
+- Flexible priority and status management
+- Budget tracking with currency support
+- Airport code integration with existing data
+- Audit trail with timestamps
+- User-based order organization
+
+### User Management API
+
+#### Authentication
+```python
+# Create user
+user = db.create_user(
+    email="user@example.com",
+    password="secure_password",
+    first_name="John",
+    last_name="Doe"
+)
+
+# Authenticate user
+user = db.authenticate_user("user@example.com", "password")
+
+# Change password
+db.change_password(user_id, "new_password")
+```
+
+#### User Operations
+```python
+# Get user information
+user = db.get_user_by_id(user_id)
+user = db.get_user_by_uuid(user_uuid)
+
+# Update user
+db.update_user(user_id, first_name="Jane", is_admin=True)
+
+# List users
+users = db.list_users(active_only=True)
+```
+
+### Mission Order Management API
+
+#### Order Operations
+```python
+# Create mission order
+order = db.create_mission_order(
+    user_id=1,
+    title="Business Trip to Manila",
+    departure_airport="SYD",
+    arrival_airport="MNL",
+    departure_date="2025-10-15",
+    passenger_count=2,
+    priority="high",
+    budget_amount=5000.00
+)
+
+# Get orders
+order = db.get_mission_order_by_id(order_id)
+user_orders = db.get_user_mission_orders(user_id)
+all_orders = db.list_mission_orders(status="pending")
+
+# Update order
+db.update_mission_order(order_id, status="approved", aircraft_type="A320")
+```
+
+#### Analytics
+```python
+# Order statistics
+stats = db.get_mission_order_statistics()
+# Returns: total_orders, by_status, by_priority, recent_orders
+```
+
 This schema provides a solid foundation for aviation data analytics with room for expansion as more API endpoints are integrated.

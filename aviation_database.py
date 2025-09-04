@@ -3,6 +3,8 @@ import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 import os
+import bcrypt
+import uuid
 
 class AviationDatabase:
     """Database manager for Aviation Edge API data."""
@@ -110,6 +112,51 @@ class AviationDatabase:
             )
         ''')
         
+        # Users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_uuid TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
+                is_active BOOLEAN DEFAULT 1,
+                is_admin BOOLEAN DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP
+            )
+        ''')
+        
+        # Mission Orders table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mission_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_uuid TEXT UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                priority TEXT DEFAULT 'medium',
+                status TEXT DEFAULT 'pending',
+                departure_airport TEXT,
+                arrival_airport TEXT,
+                departure_date DATE,
+                return_date DATE,
+                passenger_count INTEGER DEFAULT 1,
+                aircraft_type TEXT,
+                special_requirements TEXT,
+                budget_amount DECIMAL(10,2),
+                currency TEXT DEFAULT 'USD',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (departure_airport) REFERENCES airports(iata_code),
+                FOREIGN KEY (arrival_airport) REFERENCES airports(iata_code)
+            )
+        ''')
+        
         # Create indexes for better performance
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_routes_departure ON routes(departure_iata)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_routes_arrival ON routes(arrival_iata)')
@@ -119,6 +166,15 @@ class AviationDatabase:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_schedules_airline ON flight_schedules(airline_iata)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_schedules_status ON flight_schedules(status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_schedules_type ON flight_schedules(flight_type)')
+        
+        # New table indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_uuid ON users(user_uuid)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_mission_orders_user ON mission_orders(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_mission_orders_uuid ON mission_orders(order_uuid)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_mission_orders_status ON mission_orders(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_mission_orders_priority ON mission_orders(priority)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_mission_orders_departure_date ON mission_orders(departure_date)')
         
         self.conn.commit()
     
@@ -357,6 +413,349 @@ class AviationDatabase:
         
         cursor.execute(query, params)
         return [dict(row) for row in cursor.fetchall()]
+    
+    # ===========================================
+    # USER MANAGEMENT METHODS
+    # ===========================================
+    
+    def hash_password(self, password: str) -> str:
+        """Hash a password using bcrypt."""
+        salt = bcrypt.gensalt()
+        hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+        return hashed.decode('utf-8')
+    
+    def verify_password(self, password: str, hashed: str) -> bool:
+        """Verify a password against its hash."""
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    
+    def create_user(self, email: str, password: str, first_name: str = None, last_name: str = None, is_admin: bool = False):
+        """Create a new user with secure password hashing."""
+        cursor = self.conn.cursor()
+        
+        # Check if email already exists
+        cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
+        if cursor.fetchone():
+            raise ValueError(f"User with email {email} already exists")
+        
+        # Generate UUID and hash password
+        user_uuid = str(uuid.uuid4())
+        password_hash = self.hash_password(password)
+        
+        cursor.execute('''
+            INSERT INTO users (user_uuid, email, password_hash, first_name, last_name, is_admin)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (user_uuid, email, password_hash, first_name, last_name, is_admin))
+        
+        self.conn.commit()
+        user_id = cursor.lastrowid
+        
+        # Return user info (without password hash)
+        return {
+            'id': user_id,
+            'user_uuid': user_uuid,
+            'email': email,
+            'first_name': first_name,
+            'last_name': last_name,
+            'is_admin': is_admin
+        }
+    
+    def authenticate_user(self, email: str, password: str):
+        """Authenticate user and update last login."""
+        cursor = self.conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, user_uuid, email, password_hash, first_name, last_name, is_active, is_admin
+            FROM users WHERE email = ? AND is_active = 1
+        ''', (email,))
+        
+        user = cursor.fetchone()
+        if not user:
+            return None
+        
+        if not self.verify_password(password, user['password_hash']):
+            return None
+        
+        # Update last login
+        cursor.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', (user['id'],))
+        self.conn.commit()
+        
+        # Return user info (without password hash)
+        return {
+            'id': user['id'],
+            'user_uuid': user['user_uuid'],
+            'email': user['email'],
+            'first_name': user['first_name'],
+            'last_name': user['last_name'],
+            'is_admin': user['is_admin']
+        }
+    
+    def get_user_by_id(self, user_id: int):
+        """Get user by ID."""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, user_uuid, email, first_name, last_name, is_active, is_admin, created_at, last_login
+            FROM users WHERE id = ?
+        ''', (user_id,))
+        
+        user = cursor.fetchone()
+        return dict(user) if user else None
+    
+    def get_user_by_uuid(self, user_uuid: str):
+        """Get user by UUID."""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT id, user_uuid, email, first_name, last_name, is_active, is_admin, created_at, last_login
+            FROM users WHERE user_uuid = ?
+        ''', (user_uuid,))
+        
+        user = cursor.fetchone()
+        return dict(user) if user else None
+    
+    def update_user(self, user_id: int, **kwargs):
+        """Update user information."""
+        cursor = self.conn.cursor()
+        
+        allowed_fields = ['email', 'first_name', 'last_name', 'is_active', 'is_admin']
+        updates = []
+        params = []
+        
+        for field, value in kwargs.items():
+            if field in allowed_fields:
+                updates.append(f"{field} = ?")
+                params.append(value)
+        
+        if not updates:
+            return False
+        
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(user_id)
+        
+        query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+        cursor.execute(query, params)
+        self.conn.commit()
+        
+        return cursor.rowcount > 0
+    
+    def change_password(self, user_id: int, new_password: str):
+        """Change user password."""
+        cursor = self.conn.cursor()
+        password_hash = self.hash_password(new_password)
+        
+        cursor.execute('''
+            UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        ''', (password_hash, user_id))
+        
+        self.conn.commit()
+        return cursor.rowcount > 0
+    
+    def list_users(self, active_only: bool = True):
+        """List all users."""
+        cursor = self.conn.cursor()
+        
+        query = '''
+            SELECT id, user_uuid, email, first_name, last_name, is_active, is_admin, created_at, last_login
+            FROM users
+        '''
+        
+        if active_only:
+            query += " WHERE is_active = 1"
+        
+        query += " ORDER BY created_at DESC"
+        
+        cursor.execute(query)
+        return [dict(row) for row in cursor.fetchall()]
+    
+    # ===========================================
+    # MISSION ORDER MANAGEMENT METHODS
+    # ===========================================
+    
+    def create_mission_order(self, user_id: int, title: str, **kwargs):
+        """Create a new mission order."""
+        cursor = self.conn.cursor()
+        
+        # Verify user exists
+        cursor.execute('SELECT id FROM users WHERE id = ? AND is_active = 1', (user_id,))
+        if not cursor.fetchone():
+            raise ValueError(f"User ID {user_id} not found or inactive")
+        
+        # Generate UUID
+        order_uuid = str(uuid.uuid4())
+        
+        # Allowed fields for mission orders
+        allowed_fields = {
+            'description': kwargs.get('description'),
+            'priority': kwargs.get('priority', 'medium'),
+            'status': kwargs.get('status', 'pending'),
+            'departure_airport': kwargs.get('departure_airport'),
+            'arrival_airport': kwargs.get('arrival_airport'),
+            'departure_date': kwargs.get('departure_date'),
+            'return_date': kwargs.get('return_date'),
+            'passenger_count': kwargs.get('passenger_count', 1),
+            'aircraft_type': kwargs.get('aircraft_type'),
+            'special_requirements': kwargs.get('special_requirements'),
+            'budget_amount': kwargs.get('budget_amount'),
+            'currency': kwargs.get('currency', 'USD')
+        }
+        
+        cursor.execute('''
+            INSERT INTO mission_orders (
+                order_uuid, user_id, title, description, priority, status,
+                departure_airport, arrival_airport, departure_date, return_date,
+                passenger_count, aircraft_type, special_requirements,
+                budget_amount, currency
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            order_uuid, user_id, title,
+            allowed_fields['description'], allowed_fields['priority'], allowed_fields['status'],
+            allowed_fields['departure_airport'], allowed_fields['arrival_airport'],
+            allowed_fields['departure_date'], allowed_fields['return_date'],
+            allowed_fields['passenger_count'], allowed_fields['aircraft_type'],
+            allowed_fields['special_requirements'], allowed_fields['budget_amount'],
+            allowed_fields['currency']
+        ))
+        
+        self.conn.commit()
+        order_id = cursor.lastrowid
+        
+        return {
+            'id': order_id,
+            'order_uuid': order_uuid,
+            'user_id': user_id,
+            'title': title,
+            **allowed_fields
+        }
+    
+    def get_mission_order_by_id(self, order_id: int):
+        """Get mission order by ID."""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM mission_orders WHERE id = ?', (order_id,))
+        
+        order = cursor.fetchone()
+        return dict(order) if order else None
+    
+    def get_mission_order_by_uuid(self, order_uuid: str):
+        """Get mission order by UUID."""
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM mission_orders WHERE order_uuid = ?', (order_uuid,))
+        
+        order = cursor.fetchone()
+        return dict(order) if order else None
+    
+    def get_user_mission_orders(self, user_id: int, status: str = None):
+        """Get all mission orders for a user."""
+        cursor = self.conn.cursor()
+        
+        query = "SELECT * FROM mission_orders WHERE user_id = ?"
+        params = [user_id]
+        
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        
+        query += " ORDER BY created_at DESC"
+        
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def update_mission_order(self, order_id: int, **kwargs):
+        """Update mission order."""
+        cursor = self.conn.cursor()
+        
+        allowed_fields = [
+            'title', 'description', 'priority', 'status', 'departure_airport',
+            'arrival_airport', 'departure_date', 'return_date', 'passenger_count',
+            'aircraft_type', 'special_requirements', 'budget_amount', 'currency'
+        ]
+        
+        updates = []
+        params = []
+        
+        for field, value in kwargs.items():
+            if field in allowed_fields:
+                updates.append(f"{field} = ?")
+                params.append(value)
+        
+        if not updates:
+            return False
+        
+        # Handle completion
+        if kwargs.get('status') == 'completed':
+            updates.append("completed_at = CURRENT_TIMESTAMP")
+        
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(order_id)
+        
+        query = f"UPDATE mission_orders SET {', '.join(updates)} WHERE id = ?"
+        cursor.execute(query, params)
+        self.conn.commit()
+        
+        return cursor.rowcount > 0
+    
+    def list_mission_orders(self, status: str = None, priority: str = None, limit: int = None):
+        """List mission orders with optional filters."""
+        cursor = self.conn.cursor()
+        
+        query = '''
+            SELECT mo.*, u.email, u.first_name, u.last_name
+            FROM mission_orders mo
+            JOIN users u ON mo.user_id = u.id
+            WHERE 1=1
+        '''
+        params = []
+        
+        if status:
+            query += " AND mo.status = ?"
+            params.append(status)
+        
+        if priority:
+            query += " AND mo.priority = ?"
+            params.append(priority)
+        
+        query += " ORDER BY mo.created_at DESC"
+        
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+    
+    def get_mission_order_statistics(self):
+        """Get mission order statistics."""
+        cursor = self.conn.cursor()
+        
+        stats = {}
+        
+        # Total orders
+        cursor.execute('SELECT COUNT(*) as total FROM mission_orders')
+        stats['total_orders'] = cursor.fetchone()['total']
+        
+        # Orders by status
+        cursor.execute('''
+            SELECT status, COUNT(*) as count
+            FROM mission_orders
+            GROUP BY status
+        ''')
+        stats['by_status'] = {row['status']: row['count'] for row in cursor.fetchall()}
+        
+        # Orders by priority
+        cursor.execute('''
+            SELECT priority, COUNT(*) as count
+            FROM mission_orders
+            GROUP BY priority
+        ''')
+        stats['by_priority'] = {row['priority']: row['count'] for row in cursor.fetchall()}
+        
+        # Recent orders (last 30 days)
+        cursor.execute('''
+            SELECT COUNT(*) as recent
+            FROM mission_orders
+            WHERE created_at >= datetime('now', '-30 days')
+        ''')
+        stats['recent_orders'] = cursor.fetchone()['recent']
+        
+        return stats
     
     def close(self):
         """Close the database connection."""
