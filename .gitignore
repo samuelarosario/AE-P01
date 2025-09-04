@@ -111,9 +111,9 @@ env.bak/
 venv.bak/
 
 # Database files
-*.db
-*.sqlite
-*.sqlite3
+# *.db
+# *.sqlite
+# *.sqlite3
 
 # Spyder project settings
 .spyderproject
