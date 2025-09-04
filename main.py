@@ -1,46 +1,63 @@
-from aviation_edge_client import AviationEdgeClient
+from aviation_edge_schedule_client import AviationEdgeScheduleClient
+from aviation_edge_future_client import AviationEdgeFutureSchedulesClient
 
 def main():
     """Main function to demonstrate Aviation Edge API usage."""
     try:
-        # Initialize the client
-        client = AviationEdgeClient()
+        # Initialize the Schedule API client
+        schedule_client = AviationEdgeScheduleClient()
+        
+        # Initialize the Future Schedules API client
+        future_client = AviationEdgeFutureSchedulesClient()
         
         print("Aviation Edge API Client Demo")
         print("=" * 40)
         
-        # Example 1: Get routes from OTP airport (Bucharest)
-        print("\n1. Routes from OTP (Bucharest):")
-        routes = client.get_routes(departure_iata="OTP")
-        if routes:
-            print(f"Found {len(routes)} routes")
-            # Display first route as example
-            if isinstance(routes, list) and len(routes) > 0:
-                route = routes[0]
-                print(f"Sample route: {route.get('airlineIata', 'N/A')} {route.get('flightNumber', 'N/A')}")
-                print(f"  {route.get('departureIata', 'N/A')} -> {route.get('arrivalIata', 'N/A')}")
-                print(f"  Departure: {route.get('departureTime', 'N/A')}")
-                print(f"  Arrival: {route.get('arrivalTime', 'N/A')}")
+        # Example 1: Get current schedules from MNL airport
+        print("\n1. Current departures from MNL (Manila):")
+        schedules = schedule_client.get_departures("MNL")
+        if schedules:
+            print(f"Found {len(schedules)} departures")
+            # Display first schedule as example
+            if isinstance(schedules, list) and len(schedules) > 0:
+                schedule = schedules[0]
+                airline = schedule.get('airline', {})
+                flight = schedule.get('flight', {})
+                departure = schedule.get('departure', {})
+                arrival = schedule.get('arrival', {})
+                print(f"Sample flight: {airline.get('name', 'N/A')} {flight.get('number', 'N/A')}")
+                print(f"  {departure.get('iataCode', 'N/A')} -> {arrival.get('iataCode', 'N/A')}")
+                print(f"  Departure: {departure.get('scheduledTime', 'N/A')}")
+                print(f"  Status: {schedule.get('status', 'N/A')}")
         else:
-            print("No routes found")
+            print("No schedules found")
         
-        # Example 2: Search for specific airline routes
-        print("\n2. Wizz Air (W6) routes:")
-        routes = client.get_airline_routes("W6")
-        if routes:
-            print(f"Found {len(routes)} Wizz Air routes")
+        # Example 2: Search for Philippine Airlines schedules
+        print("\n2. Philippine Airlines (PR) schedules:")
+        pr_schedules = schedule_client.get_airline_schedules("PR")
+        if pr_schedules:
+            print(f"Found {len(pr_schedules)} Philippine Airlines schedules")
         else:
-            print("No Wizz Air routes found")
+            print("No Philippine Airlines schedules found")
         
-        # Example 3: Routes between specific airports
-        print("\n3. Routes from OTP to TRF:")
-        routes = client.search_routes_by_airports("OTP", "TRF")
-        if routes:
-            print(f"Found {len(routes)} routes between OTP and TRF")
-            for route in routes[:3]:  # Show first 3 routes
-                print(f"  {route.get('airlineIata', 'N/A')} {route.get('flightNumber', 'N/A')} - {route.get('departureTime', 'N/A')} to {route.get('arrivalTime', 'N/A')}")
+        # Example 3: Future Schedules API (if available)
+        print("\n3. Future Schedules API Status:")
+        if future_client.is_available():
+            print("✅ Future Schedules API is available")
+            print("   You can use future flight planning features")
+            
+            try:
+                # Example future query (requires date after 2025-09-11)
+                print("\n   Testing future schedules for MNL on 2025-09-12:")
+                future_departures = future_client.get_and_save_future_schedules(
+                    "MNL", "departure", "2025-09-12", save_to_db=True
+                )
+                print(f"   Found {len(future_departures)} future departures")
+            except Exception as e:
+                print(f"   Future schedules test failed: {e}")
         else:
-            print("No routes found between OTP and TRF")
+            print("❌ Future Schedules API is not available")
+            print("   Using current schedules and database for flight planning")
             
     except ValueError as e:
         print(f"Configuration error: {e}")

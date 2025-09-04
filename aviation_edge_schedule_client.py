@@ -104,6 +104,57 @@ class AviationEdgeScheduleClient:
             'arrivals': self.get_arrivals(airport_code)
         }
     
+    def get_airline_schedules(self, airline_code: str) -> List[Dict[str, Any]]:
+        """
+        Get all schedules for a specific airline by searching major airports.
+        Note: The timetable API doesn't support direct airline filtering,
+        so this method searches multiple airports and filters results.
+        
+        Args:
+            airline_code: IATA or ICAO airline code
+            
+        Returns:
+            List of schedules for the specified airline
+        """
+        # Major airports to search for airline schedules
+        major_airports = ['MNL', 'DVO', 'CEB', 'ILO', 'NRT', 'HND', 'ICN', 'BKK', 'SIN', 'HKG']
+        all_schedules = []
+        
+        for airport in major_airports:
+            try:
+                # Get departures for this airport
+                departures = self.get_departures(airport)
+                # Filter by airline
+                airline_departures = self.filter_by_airline(departures, airline_code)
+                all_schedules.extend(airline_departures)
+                
+                # Small delay to avoid overwhelming API
+                import time
+                time.sleep(0.5)
+                
+            except Exception as e:
+                print(f"Warning: Could not get schedules for {airport}: {e}")
+                continue
+        
+        # Remove duplicates based on flight number and departure time
+        unique_schedules = []
+        seen_flights = set()
+        
+        for schedule in all_schedules:
+            flight_info = schedule.get('flight', {})
+            departure_info = schedule.get('departure', {})
+            key = (
+                flight_info.get('number', ''),
+                departure_info.get('scheduledTime', ''),
+                departure_info.get('iataCode', '')
+            )
+            
+            if key not in seen_flights:
+                seen_flights.add(key)
+                unique_schedules.append(schedule)
+        
+        return unique_schedules
+    
     def filter_by_airline(self, schedules: List[Dict[str, Any]], airline_code: str) -> List[Dict[str, Any]]:
         """
         Filter schedules by airline code.

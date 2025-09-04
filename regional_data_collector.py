@@ -2,10 +2,11 @@
 """
 Regional Aviation Data Collection Plan
 Comprehensive coverage for EU, Asia Pacific, Middle East, and US routes and airports.
+Now using Future Schedules API and Schedule API only.
 """
 
-from aviation_edge_client import AviationEdgeClient
 from aviation_edge_schedule_client import AviationEdgeScheduleClient
+from aviation_edge_future_client import AviationEdgeFutureSchedulesClient
 from aviation_database import AviationDatabase
 import time
 from datetime import datetime
@@ -14,8 +15,8 @@ class RegionalAviationCollector:
     """Collector for regional aviation data with comprehensive coverage."""
     
     def __init__(self):
-        self.routes_client = AviationEdgeClient()
         self.schedules_client = AviationEdgeScheduleClient()
+        self.future_client = AviationEdgeFutureSchedulesClient()
         
         # Regional airport definitions
         self.regions = {
@@ -206,33 +207,53 @@ class RegionalAviationCollector:
                         except Exception as e:
                             print(f"    ❌ Error getting arrivals for {airport}: {e}")
                     
-                    # Collect routes by departure airports
+                    # Collect schedules by departure airports (this replaces routes collection)
                     for airport in config['major_airports']:
-                        print(f"  🛫 Collecting routes from {airport}...")
+                        print(f"  🛫 Collecting departures from {airport}...")
                         try:
-                            routes = self.routes_client.get_routes(departure_iata=airport)
-                            for route in routes:
-                                db.insert_route(route)
-                            db.log_api_usage("/routes", {"departureIata": airport}, len(routes))
-                            total_collected['routes'] += len(routes)
+                            departures = self.schedules_client.get_departures(airport)
+                            for schedule in departures:
+                                db.insert_schedule(schedule)
+                            db.log_api_usage("/timetable", {"iataCode": airport, "type": "departure"}, len(departures))
+                            total_collected['schedules'] += len(departures)
                             total_collected['api_calls'] += 1
                             time.sleep(1.5)
                         except Exception as e:
-                            print(f"    ❌ Error getting routes from {airport}: {e}")
+                            print(f"    ❌ Error getting departures from {airport}: {e}")
                     
-                    # Collect routes by airlines
+                    # Collect airline-specific schedules (this replaces airline routes collection)
                     for airline in config['major_airlines']:
-                        print(f"  ✈️  Collecting routes for {airline}...")
+                        print(f"  ✈️  Collecting schedules for {airline}...")
                         try:
-                            routes = self.routes_client.get_routes(airline_iata=airline)
-                            for route in routes:
-                                db.insert_route(route)
-                            db.log_api_usage("/routes", {"airlineIata": airline}, len(routes))
-                            total_collected['routes'] += len(routes)
+                            airline_schedules = self.schedules_client.get_airline_schedules(airline)
+                            for schedule in airline_schedules:
+                                db.insert_schedule(schedule)
+                            db.log_api_usage("/timetable", {"airlineIata": airline}, len(airline_schedules))
+                            total_collected['schedules'] += len(airline_schedules)
                             total_collected['api_calls'] += 1
                             time.sleep(1.5)
                         except Exception as e:
-                            print(f"    ❌ Error getting routes for {airline}: {e}")
+                            print(f"    ❌ Error getting schedules for {airline}: {e}")
+                    
+                    # Try Future Schedules API if available
+                    if self.future_client.is_available():
+                        print(f"  🔮 Attempting future schedules collection...")
+                        try:
+                            # Collect future schedules for major airports (7 days from now)
+                            from datetime import datetime, timedelta
+                            future_date = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+                            
+                            for airport in config['major_airports'][:3]:  # Limit to first 3 airports
+                                print(f"    🔮 Future schedules for {airport} on {future_date}...")
+                                future_data = self.future_client.collect_airport_future_data(airport, future_date)
+                                if future_data.get('statistics', {}).get('total_flights', 0) > 0:
+                                    print(f"    ✅ Collected {future_data['statistics']['total_flights']} future flights")
+                                    total_collected['future_schedules'] = total_collected.get('future_schedules', 0) + future_data['statistics']['total_flights']
+                                time.sleep(2)  # Longer delay for future API
+                        except Exception as e:
+                            print(f"    ⚠️  Future schedules collection failed: {e}")
+                    else:
+                        print(f"  ⚠️  Future Schedules API not available, using current schedules only")
                     
                     region_duration = datetime.now() - region_start
                     print(f"  ✅ {region_name} completed in {region_duration.total_seconds():.1f} seconds")
@@ -246,9 +267,10 @@ class RegionalAviationCollector:
         print(f"\n🎉 COLLECTION COMPLETE!")
         print("=" * 70)
         print(f"Total API calls: {total_collected['api_calls']}")
-        print(f"Routes collected: {total_collected['routes']:,}")
         print(f"Schedules collected: {total_collected['schedules']:,}")
-        print(f"Total records: {total_collected['routes'] + total_collected['schedules']:,}")
+        if 'future_schedules' in total_collected:
+            print(f"Future schedules collected: {total_collected['future_schedules']:,}")
+        print(f"Total records: {total_collected['schedules'] + total_collected.get('future_schedules', 0):,}")
 
 def main():
     """Main function for regional aviation data collection."""

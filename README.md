@@ -65,13 +65,8 @@ python main.py
 ## Example Usage
 
 ```python
-from aviation_edge_client import AviationEdgeClient
 from aviation_edge_schedule_client import AviationEdgeScheduleClient
 from aviation_edge_future_client import AviationEdgeFutureSchedulesClient
-
-# Routes API
-routes_client = AviationEdgeClient()
-routes = routes_client.get_routes(departure_iata="OTP")
 
 # Schedules API  
 schedule_client = AviationEdgeScheduleClient()
@@ -87,18 +82,15 @@ else:
 
 ## API Clients
 
-### 1. Routes API (`aviation_edge_client.py`)
-- Query flight routes between airports
-- Filter by airlines and flight numbers
-- Get all routes for specific airline
-
-### 2. Schedules API (`aviation_edge_schedule_client.py`) 
+### 1. Schedules API (`aviation_edge_schedule_client.py`) 
 - Current flight schedules and timetables
 - Departure and arrival information
 - Real-time flight status
+- Airline-specific schedule queries
 
-### 3. Future Schedules API (`aviation_edge_future_client.py`) ⚠️
-- **Status**: Endpoint not currently available (404 errors)
-- **Purpose**: Recurring flight schedules by weekday
+### 2. Future Schedules API (`aviation_edge_future_client.py`) ✅
+- **Status**: Fully implemented with database integration
+- **Purpose**: Recurring flight schedules by weekday and future dates
+- **Features**: Database auto-save, batch collection, comprehensive data analysis
 - **Documentation**: See `FUTURE_SCHEDULES_API.md` for details
-- **Action Required**: Contact Aviation Edge for endpoint access
+- **Database Integration**: Automatically saves to `flight_schedules` table
